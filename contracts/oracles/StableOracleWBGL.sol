@@ -14,11 +14,11 @@ contract StableOracleWBGL is IStableOracle {
     IStaticOracle staticOracleUniV3;
     IStableOracle ethOracle;
 
-    constructor(address _WETHoracle) {
+    constructor(address _wethoracle) {
         staticOracleUniV3 = IStaticOracle(
-            0x982152A6C7f732Ec7C9EA998dDD9Ebde00Dfa16e
+            0xB210CE856631EeEB767eFa666EC7C1C57738d438 // Mean finance static oracle on mainnet
         );
-        ethOracle = IStableOracle(_WETHoracle);
+        ethOracle = IStableOracle(_wethoracle);
     }
 
     function getPriceUSD() external view override returns (uint256) {

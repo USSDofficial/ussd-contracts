@@ -3,12 +3,14 @@ pragma solidity ^0.8.6;
 
 import "./interfaces/IUSSDRebalancer.sol";
 
-import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import '@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol';
 
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
 import "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/IERC20MetadataUpgradeable.sol";
+
+import "./interfaces/IUniswapLiqCalculator.sol";
 
 /**
     @dev rebalancer module for USSD ERC20 token. Performs swaps to return USSD/DAI pool balance 1-to-1
@@ -34,6 +36,25 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
 
     // role to perform rebalancer management functions
     bytes32 public constant STABLE_CONTROL_ROLE = keccak256("STABLECONTROL");
+
+    // uni v3 liqudity calculator
+    // rebalance amount should account for range liquidity
+    // target prices are:
+    //
+    // USSD token0, DAI token1
+    // sqrtPriceX96: 79228162514264337593543950336000000
+    // tick: 276324
+    // target price 1:1, 6 decimals/18 decimals
+    //
+    // DAI token0, USSD token1
+    // sqrtPriceX96: 79228162514264337593543
+    // tick: -276325
+    // target price 1:1, 18 decimals/6 decimals
+
+    uint160 constant PRICE_USSDFIRST = 79228162514264337593543950336000000;
+    uint160 constant PRICE_DAIFIRST = 79228162514264337593543;
+
+    IUniswapLiqCalculator univ3liqcalc;
 
     function initialize(address _ussd) public initializer {
         _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
@@ -67,6 +88,10 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
       baseAsset = _baseAsset;
     }
 
+    function setUniswapCalculator(address _calculator) onlyControl public {
+      univ3liqcalc = IUniswapLiqCalculator(_calculator);
+    }
+
     /// @dev get price estimation to DAI using pool address and uniswap price
     function getOwnValuation() public view returns (uint256 price) {
       (uint160 sqrtPriceX96,,,,,,) =  uniPool.slot0();
@@ -80,28 +105,43 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
     }
 
     /// @dev return pool balances with USSD first
-    function getSupplyProportion() public view returns (uint256, uint256) {
+    // was used in 1st prototype, not used anymore as V3 pools are not just constant product price, but use much
+    // more complicated model of ranged/tick liquidity, for that purpsoe a USSDUniV3LiqCalculator module was implemented
+    /*function getSupplyProportion() public view returns (uint256, uint256) {
       uint256 vol1 = IERC20Upgradeable(uniPool.token0()).balanceOf(address(uniPool));
       uint256 vol2 = IERC20Upgradeable(uniPool.token1()).balanceOf(address(uniPool));
       if (uniPool.token0() == USSD) {
         return (vol1, vol2);
       }
       return (vol2, vol1);
+    }*/
+
+    // calculate swap amount required for reaching target price
+    function calculateAmountTillPriceMatch(uint160 targetPriceX96) public view returns (int256 amount0) {
+      return univ3liqcalc.calculateAmountTillPriceMatch(address(uniPool), targetPriceX96);
     }
 
     function rebalance() override public {
       uint256 ownval = getOwnValuation();
-      (uint256 USSDamount, uint256 DAIamount) = getSupplyProportion();
+
       if (ownval < 1e6 - threshold) {
         // peg-down recovery
-        BuyUSSDSellCollateral((USSDamount - DAIamount / 1e12)/2);
+        uint256 amountToBuy;
+        if(uniPool.token0() == USSD) {
+          amountToBuy = uint256(calculateAmountTillPriceMatch(PRICE_USSDFIRST));
+        } else {
+          amountToBuy = uint256(calculateAmountTillPriceMatch(PRICE_DAIFIRST));
+        }
+        BuyUSSDSellCollateral(amountToBuy / 1e12);
+
       } else if (ownval > 1e6 + threshold) {
-        // mint and buy collateral
-        // never sell too much USSD for DAI so it 'overshoots' (becomes more in quantity than DAI on the pool)
-        // otherwise could be arbitraged through mint/redeem
-        // the execution difference due to fee should be taken into accounting too
-        // take 1% safety margin (estimated as 2 x 0.5% fee)
-        IUSSD(USSD).mintRebalancer(((DAIamount / 1e12 - USSDamount)/2) * 99 / 100); // mint ourselves amount till balance recover
+        // mint USSD and buy collateral
+        if(uniPool.token0() == USSD) {
+          IUSSD(USSD).mintRebalancer(uint256(calculateAmountTillPriceMatch(PRICE_USSDFIRST)));
+        } else {
+          IUSSD(USSD).mintRebalancer(uint256(calculateAmountTillPriceMatch(PRICE_DAIFIRST)));
+        }
+
         SellUSSDBuyCollateral();
       }
     }
@@ -120,7 +160,6 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
             uint256 amountBefore = IERC20Upgradeable(baseAsset).balanceOf(USSD);
             uint256 amountToSellUnits = IERC20Upgradeable(collateral[i].token).balanceOf(USSD) * ((amountToBuyLeftUSD * 1e18 / collateralval) / 1e18) / 1e18;
             IUSSD(USSD).UniV3SwapInput(collateral[i].pathsell, amountToSellUnits);
-            amountToBuyLeftUSD -= (IERC20Upgradeable(baseAsset).balanceOf(USSD) - amountBefore);
             DAItosell += (IERC20Upgradeable(baseAsset).balanceOf(USSD) - amountBefore);
           } else {
             // no need to swap DAI
@@ -130,11 +169,17 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
         } else {
           // sell all or skip (if collateral is too little, 5% treshold)
           if (collateralval >= amountToBuyLeftUSD / 20) {
-            uint256 amountBefore = IERC20Upgradeable(baseAsset).balanceOf(USSD);
-            // sell all collateral and move to next one
-            IUSSD(USSD).UniV3SwapInput(collateral[i].pathsell, IERC20Upgradeable(collateral[i].token).balanceOf(USSD));
-            amountToBuyLeftUSD -= (IERC20Upgradeable(baseAsset).balanceOf(USSD) - amountBefore);
-            DAItosell += (IERC20Upgradeable(baseAsset).balanceOf(USSD) - amountBefore);
+            if (collateral[i].pathsell.length > 0) {
+              uint256 amountBefore = IERC20Upgradeable(baseAsset).balanceOf(USSD);
+              // sell all collateral and move to next one
+              IUSSD(USSD).UniV3SwapInput(collateral[i].pathsell, IERC20Upgradeable(collateral[i].token).balanceOf(USSD));
+              amountToBuyLeftUSD -= (IERC20Upgradeable(baseAsset).balanceOf(USSD) - amountBefore);
+              DAItosell += (IERC20Upgradeable(baseAsset).balanceOf(USSD) - amountBefore);
+            } else {
+              // no need to swap DAI
+              amountToBuyLeftUSD -= collateralval;
+              DAItosell = IERC20Upgradeable(collateral[i].token).balanceOf(USSD) * amountToBuyLeftUSD / collateralval;
+            }
           }
         }
       }
@@ -167,17 +212,21 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
       if (uniPool.token0() == USSD) {
         daibought = IERC20Upgradeable(baseAsset).balanceOf(USSD);
         IUSSD(USSD).UniV3SwapInput(bytes.concat(abi.encodePacked(uniPool.token0(), hex"0001f4", uniPool.token1())), amount);
-        daibought = IERC20Upgradeable(baseAsset).balanceOf(USSD) - daibought; // would revert if not bought
+        daibought = IERC20Upgradeable(baseAsset).balanceOf(USSD) - daibought; // would revert if DAI is not bought
       } else {
         daibought = IERC20Upgradeable(baseAsset).balanceOf(USSD);
         IUSSD(USSD).UniV3SwapInput(bytes.concat(abi.encodePacked(uniPool.token1(), hex"0001f4", uniPool.token0())), amount);
-        daibought = IERC20Upgradeable(baseAsset).balanceOf(USSD) - daibought; // would revert if not bought
+        daibought = IERC20Upgradeable(baseAsset).balanceOf(USSD) - daibought; // would revert if DAI is not bought
+      }
+
+      if(daibought == 0) {
+        return;
       }
 
       // total collateral portions
       uint256 cf = IUSSD(USSD).collateralFactor();
       uint256 flutter = 0;
-      for (flutter = 0; flutter < flutterRatios.length; flutter++) {
+      for (flutter = 0; flutter < flutterRatios.length - 1 /* -1 to remain on highest flutter ratio not step over boundary */; flutter++) {
         if (cf < flutterRatios[flutter]) {
           break;
         }
@@ -196,7 +245,7 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
       for (uint256 i = 0; i < collateral.length; i++) {
         uint256 collateralval = IERC20Upgradeable(collateral[i].token).balanceOf(USSD) * 1e18 / (10**IERC20MetadataUpgradeable(collateral[i].token).decimals()) * collateral[i].oracle.getPriceUSD() / 1e18;
         if (collateralval * 1e18 / ownval < collateral[i].ratios[flutter]) {
-          if (collateral[i].token != uniPool.token0() || collateral[i].token != uniPool.token1()) {
+          if (collateral[i].pathbuy.length > 0) {
             // don't touch DAI if it's needed to be bought (it's already bought)
             IUSSD(USSD).UniV3SwapInput(collateral[i].pathbuy, daibought/portions);
           }

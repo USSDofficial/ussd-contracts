@@ -21,6 +21,7 @@
     "solhint-plugin-prettier": "^0.0.5",
     "truffle": "^5.8.1",
     "truffle-assertions": "^0.9.2",
+    "truffle-contract-size": "^2.0.1",
     "truffle-flattener": "^1.6.0"
   }
 }

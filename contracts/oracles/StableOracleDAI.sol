@@ -17,23 +17,24 @@ import "../interfaces/IStaticOracle.sol";
 */
 contract StableOracleDAI is IStableOracle {
     AggregatorV3Interface priceFeedDAIETH;
-    IStaticOracle DAIEthOracle;
+    IStaticOracle staticOracleUniV3;
     IStableOracle ethOracle;
 
-    constructor() {
+    // as is uses DEX to get DAI/WETH price, stable oracle WETH address is required to keep it based to USD
+    constructor(address _wethoracle) {
         priceFeedDAIETH = AggregatorV3Interface(
             0x773616E4d11A78F511299002da57A0a94577F1f4
         );
-        DAIEthOracle = IStaticOracle(
-            0x982152A6C7f732Ec7C9EA998dDD9Ebde00Dfa16e
+        staticOracleUniV3 = IStaticOracle(
+            0xB210CE856631EeEB767eFa666EC7C1C57738d438 // Mean finance static oracle on mainnet
         );
-        ethOracle = IStableOracle(0x0000000000000000000000000000000000000000); // TODO: WETH oracle price
+        ethOracle = IStableOracle(_wethoracle);
     }
 
     function getPriceUSD() external view override returns (uint256) {
         address[] memory pools = new address[](1);
         pools[0] = 0x60594a405d53811d3BC4766596EFD80fd545A270;
-        uint256 DAIWethPrice = DAIEthOracle.quoteSpecificPoolsWithTimePeriod(
+        uint256 WETHDAIDexPrice = staticOracleUniV3.quoteSpecificPoolsWithTimePeriod(
             1000000000000000000, // 1 Eth
             0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2, // WETH (base token)
             0x6B175474E89094C44Da98b954EedeAC495271d0F, // DAI (quote token)
@@ -41,14 +42,20 @@ contract StableOracleDAI is IStableOracle {
             600 // period
         );
 
-        uint256 wethPriceUSD = ethOracle.getPriceUSD();
+        uint256 WETHUSDFeedPrice = ethOracle.getPriceUSD();
 
-        // chainlink price data is 8 decimals for WETH/USD, so multiply by 10 decimals to get 18 decimal fractional
+        // chainlink price data is 18 decimals for DAI/ETH, so multiply by 10 decimals to get 18 decimal fractional
         //(uint80 roundID, int256 price, uint256 startedAt, uint256 timeStamp, uint80 answeredInRound) = priceFeedDAIETH.latestRoundData();
         (, int256 price, , , ) = priceFeedDAIETH.latestRoundData();
 
+        // flip the fraction
+        uint256 WETHDAIFeedPrice = 1e36 / uint256(price);
+
+        // this is debatable: if using of 2 WETH/DAI separate sources safer by averaging or increase the risk of malfunction
+        // (more sources of failure)? Anyway, oracles should be monitored during first time at least and are replaceable
+        // it also could be possibly reasonable to switch to using DAI as the base valuation instead of USD for current composition
         return
-            (wethPriceUSD * 1e18) /
-            ((DAIWethPrice + uint256(price) * 1e10) / 2);
+            (WETHUSDFeedPrice * 1e18) /
+            ((WETHDAIDexPrice + WETHDAIFeedPrice) / 2);
     }
 }

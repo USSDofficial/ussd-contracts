@@ -13,7 +13,7 @@ import "./interfaces/IUSSDRebalancer.sol";
 import "@uniswap/swap-router-contracts/contracts/interfaces/IV3SwapRouter.sol";
 
 /**
-    @notice USSD: Autonomous on-chain stablecoin
+    @notice Autonomous on-chain Stablecoin
  */
 contract USSD is
     IUSSD,
@@ -21,12 +21,12 @@ contract USSD is
     AccessControlUpgradeable
 {
     using SafeERC20Upgradeable for IERC20Upgradeable;
-    using AddressUpgradeable for address payable;
+    //using AddressUpgradeable for address payable;
 
     IUSSDRebalancer public rebalancer;
 
     // allowed to manage collateral, set tresholds and perform management tasks
-    bytes32 public constant STABLE_CONTROL_ROLE = keccak256("STABLECONTROL");
+    bytes32 public constant STABLE_CONTROL_ROLE = 0x478e190950eea9a6d97fe4150463cb11a0076cc417c4b49f2ad9dd1b4d1a4ae1; //keccak256("STABLECONTROL");
 
     function initialize(
         string memory name,
@@ -50,7 +50,7 @@ contract USSD is
         @dev restrict calls only by STABLE_CONTROL_ROLE role
      */
     modifier onlyControl() {
-        require(hasRole(STABLE_CONTROL_ROLE, msg.sender), "control only");
+        require(hasRole(STABLE_CONTROL_ROLE, msg.sender), "ctrl");
         _;
     }
 
@@ -122,25 +122,38 @@ contract USSD is
         collateral.pop();
     }
 
-    function getCollateralIndex(
-        address _token
-    ) public view returns (uint256 index) {
+/*
+    function getCollateralIndex(address _token) public view returns (uint256 index) {
         for (index = 0; index < collateral.length; index++) {
             if (collateral[index].token == _token) {
-                return index;
+                break;
             }
         }
     }
 
     function hasCollateralMint(
         address _token
-    ) public view returns (bool present) {
+    ) public view returns (bool) {
         for (uint256 i = 0; i < collateral.length; i++) {
             if (collateral[i].token == _token && collateral[i].mint) {
                 return true;
             }
         }
         return false;
+    }
+*/
+
+    function getCollateralIndex(address _token, bool _hasMint) public view returns (uint256) {
+        for (uint256 index = 0; index < collateral.length; index++) {
+            if (collateral[index].token == _token) {
+                if (!_hasMint) {
+                    return index;
+                } else if (collateral[index].mint) {
+                    return index;
+                }
+            }
+        }
+        return type(uint256).max;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -153,7 +166,8 @@ contract USSD is
         uint256 tokenAmount,
         address to
     ) public returns (uint256 stableCoinAmount) {
-        require(hasCollateralMint(token), "unsupported token");
+        require(getCollateralIndex(token, true) < type(uint256).max, "mtkn");
+        require(to != address(0));
 
         IERC20Upgradeable(token).safeTransferFrom(
             msg.sender,
@@ -167,8 +181,8 @@ contract USSD is
     }
 
     /// @dev Return how much STABLECOIN does user receive for AMOUNT of asset
-    function calculateMint(address _token, uint256 _amount) public view returns (uint256 stableCoinAmount) {
-        uint256 assetPrice = collateral[getCollateralIndex(_token)].oracle.getPriceUSD();
+    function calculateMint(address _token, uint256 _amount) public view returns (uint256) {
+        uint256 assetPrice = collateral[getCollateralIndex(_token, false)].oracle.getPriceUSD();
         return (((assetPrice * _amount) / 1e18) * (10 ** decimals())) / (10 ** IERC20MetadataUpgradeable(_token).decimals());
     }
 
@@ -177,20 +191,17 @@ contract USSD is
     //////////////////////////////////////////////////////////////*/
 
     function collateralFactor() public view override returns (uint256) {
-        uint256 totalAssetsUSD = 0;
-        for (uint256 i = 0; i < collateral.length; i++) {
-            totalAssetsUSD +=
-                (((IERC20Upgradeable(collateral[i].token).balanceOf(
-                    address(this)
-                ) * 1e18) /
-                    (10 **
-                        IERC20MetadataUpgradeable(collateral[i].token)
-                            .decimals())) *
-                    collateral[i].oracle.getPriceUSD()) /
-                1e18;
+        if (totalSupply() == 0) {  
+            return 0;  
         }
 
-        return (totalAssetsUSD * 1e6) / totalSupply();
+        uint256 totalAssetsUSD = 0;
+        for (uint256 i = 0; i < collateral.length; i++) {
+            totalAssetsUSD += (((IERC20Upgradeable(collateral[i].token).balanceOf(address(this)) * 1e18) /
+                (10 ** IERC20MetadataUpgradeable(collateral[i].token).decimals())) * collateral[i].oracle.getPriceUSD()) / 1e12 /* *1e6 removed in return */;
+        }
+
+        return totalAssetsUSD /* * 1e6 */ / totalSupply();
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -201,12 +212,12 @@ contract USSD is
         rebalancer = IUSSDRebalancer(_rebalancer);
     }
 
-    function mintRebalancer(uint256 amount) public override {
-        _mint(address(this), amount);
+    function mintRebalancer(uint256 _amount) public onlyBalancer override {
+        _mint(address(this), _amount);
     }
 
-    function burnRebalancer(uint256 amount) public override {
-        _burn(address(this), amount);
+    function burnRebalancer(uint256 _amount) public onlyBalancer override {
+        _burn(address(this), _amount);
     }
 
     modifier onlyBalancer() {
@@ -224,6 +235,14 @@ contract USSD is
         uniRouter = IV3SwapRouter(_router);
     }
 
+    function approveToRouter(address _token, uint256 _amount) public onlyControl {
+        IERC20Upgradeable(_token).safeApprove(
+            address(uniRouter),
+            _amount
+        );
+    }
+
+    // actual method that performs the swap
     function UniV3SwapInput(
         bytes memory _path,
         uint256 _sellAmount
@@ -237,12 +256,5 @@ contract USSD is
                 amountOutMinimum: 0
             });
         uniRouter.exactInput(params);
-    }
-
-    function approveToRouter(address _token) public {
-        IERC20Upgradeable(_token).approve(
-            address(uniRouter),
-            0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-        );
     }
 }
