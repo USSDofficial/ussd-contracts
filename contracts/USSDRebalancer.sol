@@ -122,6 +122,10 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
     }
 
     function rebalance() override public {
+      // this function can only be called by EOA directly,
+      // to help avoid usage in combination of flash loans or price manipulation within single tx
+      require(msg.sender == tx.origin);
+
       uint256 ownval = getOwnValuation();
 
       if (ownval < 1e6 - threshold) {
