@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.6;
+pragma solidity 0.8.6;
 pragma abicoder v2;
 
 import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
@@ -28,18 +28,23 @@ contract USSD is
     // allowed to manage collateral, set tresholds and perform management tasks
     bytes32 public constant STABLE_CONTROL_ROLE = 0x478e190950eea9a6d97fe4150463cb11a0076cc417c4b49f2ad9dd1b4d1a4ae1; //keccak256("STABLECONTROL");
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     function initialize(
-        string memory name,
-        string memory symbol
+        string memory _name,
+        string memory _symbol
     ) public initializer {
         __Context_init_unchained();
         __AccessControl_init_unchained();
-        __ERC20_init_unchained(name, symbol);
+        __ERC20_init_unchained(_name, _symbol);
 
         _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
 
         // mint 10k USSD to create initial pool
-        _mint(msg.sender, 10_000 * 1e6);
+        _mint(msg.sender, 1_000 * 1e6);
     }
 
     function decimals() public view virtual override returns (uint8) {
@@ -84,8 +89,8 @@ contract USSD is
     function addCollateral(
         address _address,
         address _oracle,
-        bool _mint,
-        bool _redeem,
+        bool _hasMint,
+        bool _hasRedeem,
         uint256[] calldata _ratios,
         bytes memory _pathbuy,
         bytes memory _pathsell,
@@ -93,8 +98,8 @@ contract USSD is
     ) public onlyControl {
         CollateralInfo memory newCollateral = CollateralInfo({
             token: _address,
-            mint: _mint,
-            redeem: _redeem,
+            mint: _hasMint,
+            redeem: _hasRedeem,
             oracle: IStableOracle(_oracle),
             pathbuy: _pathbuy,
             pathsell: _pathsell,
@@ -122,29 +127,9 @@ contract USSD is
         collateral.pop();
     }
 
-/*
-    function getCollateralIndex(address _token) public view returns (uint256 index) {
-        for (index = 0; index < collateral.length; index++) {
-            if (collateral[index].token == _token) {
-                break;
-            }
-        }
-    }
-
-    function hasCollateralMint(
-        address _token
-    ) public view returns (bool) {
-        for (uint256 i = 0; i < collateral.length; i++) {
-            if (collateral[i].token == _token && collateral[i].mint) {
-                return true;
-            }
-        }
-        return false;
-    }
-*/
-
-    function getCollateralIndex(address _token, bool _hasMint) public view returns (uint256) {
-        for (uint256 index = 0; index < collateral.length; index++) {
+    function getCollateralIndex(address _token, bool _hasMint) public override view returns (uint256) {
+        uint256 length = collateral.length;
+        for (uint256 index = 0; index < length; index++) {
             if (collateral[index].token == _token) {
                 if (!_hasMint) {
                     return index;
@@ -182,8 +167,7 @@ contract USSD is
 
     /// @dev Return how much STABLECOIN does user receive for AMOUNT of asset
     function calculateMint(address _token, uint256 _amount) public view returns (uint256) {
-        uint256 assetPrice = collateral[getCollateralIndex(_token, false)].oracle.getPriceUSD();
-        return (((assetPrice * _amount) / 1e18) * (10 ** decimals())) / (10 ** IERC20MetadataUpgradeable(_token).decimals());
+        return collateral[getCollateralIndex(_token, false)].oracle.getPriceUSD() * _amount * (10 ** decimals()) / 1e18 / (10 ** IERC20MetadataUpgradeable(_token).decimals());
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -196,9 +180,10 @@ contract USSD is
         }
 
         uint256 totalAssetsUSD = 0;
-        for (uint256 i = 0; i < collateral.length; i++) {
-            totalAssetsUSD += (((IERC20Upgradeable(collateral[i].token).balanceOf(address(this)) * 1e18) /
-                (10 ** IERC20MetadataUpgradeable(collateral[i].token).decimals())) * collateral[i].oracle.getPriceUSD()) / 1e12 /* *1e6 removed in return */;
+        uint256 length = collateral.length;
+        for (uint256 i = 0; i < length; i++) {
+            totalAssetsUSD += IERC20Upgradeable(collateral[i].token).balanceOf(address(this)) * 1e6 * collateral[i].oracle.getPriceUSD() /
+                (10 ** IERC20MetadataUpgradeable(collateral[i].token).decimals()) /* *1e6 removed in return */;
         }
 
         return totalAssetsUSD /* * 1e6 */ / totalSupply();
@@ -245,7 +230,8 @@ contract USSD is
     // actual method that performs the swap
     function UniV3SwapInput(
         bytes memory _path,
-        uint256 _sellAmount
+        uint256 _sellAmount,
+        uint256 _expectedMinimum
     ) public override onlyBalancer {
         IV3SwapRouter.ExactInputParams memory params = IV3SwapRouter
             .ExactInputParams({
@@ -253,7 +239,7 @@ contract USSD is
                 recipient: address(this),
                 //deadline: block.timestamp,
                 amountIn: _sellAmount,
-                amountOutMinimum: 0
+                amountOutMinimum: _expectedMinimum
             });
         uniRouter.exactInput(params);
     }

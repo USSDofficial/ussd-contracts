@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.6;
+pragma solidity 0.8.6;
 
 import '@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol';
 
@@ -90,7 +90,7 @@ contract UniV3LiqCalculator is IUniswapLiqCalculator {
             });
 
         // continue swapping as long as we haven't used the entire input/output and haven't reached the price limit
-        while (state.sqrtPriceX96 != targetPriceX96) {
+        while (state.sqrtPriceX96 != targetPriceX96 && (zeroForOne ? state.amountSpecifiedRemaining > 0 : state.amountSpecifiedRemaining < 0)) {
             StepComputations memory step;
 
             step.sqrtPriceStartX96 = state.sqrtPriceX96;

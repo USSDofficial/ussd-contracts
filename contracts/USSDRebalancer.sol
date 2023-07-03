@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.6;
+pragma solidity 0.8.6;
 
 import "./interfaces/IUSSDRebalancer.sol";
 
@@ -28,6 +28,9 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
     // boundary to make rebalancing
     uint256 private threshold;
 
+    // minimum swap amount divisor (1e18 means 1.0 swaps and 1.05e18 that 1/1.05~=0.95238 min amount is acceptable)
+    uint256 private minDivisor;
+
     // ratios of collateralization for different collateral accumulating
     uint256[] public flutterRatios;
     
@@ -54,13 +57,19 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
     uint160 constant PRICE_USSDFIRST = 79228162514264337593543950336000000;
     uint160 constant PRICE_DAIFIRST = 79228162514264337593543;
 
-    IUniswapLiqCalculator univ3liqcalc;
+    IUniswapLiqCalculator private univ3liqcalc;
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(address _ussd) public initializer {
         _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
 
         threshold = 1e4;
         USSD = _ussd;
+        minDivisor = 1_005_000_000_000_000_000;
     }
 
     modifier onlyControl() {
@@ -78,6 +87,10 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
 
     function setTreshold(uint256 _threshold) public onlyControl {
       threshold = _threshold;
+    }
+
+    function setMinDivisor(uint256 _minDivisor) public onlyControl {
+      minDivisor = _minDivisor;
     }
 
     function setFlutterRatios(uint256[] calldata _flutterRatios) public onlyControl {
@@ -104,26 +117,12 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
       }
     }
 
-    /// @dev return pool balances with USSD first
-    // was used in 1st prototype, not used anymore as V3 pools are not just constant product price, but use much
-    // more complicated model of ranged/tick liquidity, for that purpsoe a USSDUniV3LiqCalculator module was implemented
-    /*function getSupplyProportion() public view returns (uint256, uint256) {
-      uint256 vol1 = IERC20Upgradeable(uniPool.token0()).balanceOf(address(uniPool));
-      uint256 vol2 = IERC20Upgradeable(uniPool.token1()).balanceOf(address(uniPool));
-      if (uniPool.token0() == USSD) {
-        return (vol1, vol2);
-      }
-      return (vol2, vol1);
-    }*/
-
     // calculate swap amount required for reaching target price
     function calculateAmountTillPriceMatch(uint160 targetPriceX96) public view returns (int256 amount0) {
       return univ3liqcalc.calculateAmountTillPriceMatch(address(uniPool), targetPriceX96);
     }
 
     function rebalance() override public {
-      // this function can only be called by EOA directly,
-      // to help avoid usage in combination of flash loans or price manipulation within single tx
       require(msg.sender == tx.origin);
 
       uint256 ownval = getOwnValuation();
@@ -156,14 +155,16 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
       uint amountToBuyLeftUSD = amountToBuy * 1e12;
       uint DAItosell = 0;
       // Sell collateral in order of collateral array
-      for (uint256 i = 0; i < collateral.length; i++) {
+      uint256 length = collateral.length;
+      for (uint256 i = 0; i < length; i++) {
         uint256 collateralval = IERC20Upgradeable(collateral[i].token).balanceOf(USSD) * 1e18 / (10**IERC20MetadataUpgradeable(collateral[i].token).decimals()) * collateral[i].oracle.getPriceUSD() / 1e18;
         if (collateralval > amountToBuyLeftUSD) {
           // sell a portion of collateral and exit
           if (collateral[i].pathsell.length > 0) {
             uint256 amountBefore = IERC20Upgradeable(baseAsset).balanceOf(USSD);
             uint256 amountToSellUnits = IERC20Upgradeable(collateral[i].token).balanceOf(USSD) * ((amountToBuyLeftUSD * 1e18 / collateralval) / 1e18) / 1e18;
-            IUSSD(USSD).UniV3SwapInput(collateral[i].pathsell, amountToSellUnits);
+            uint256 expectedDAI = amountToSellUnits * collateral[i].oracle.getPriceUSD() * IERC20MetadataUpgradeable(collateral[i].token).decimals() * collateral[IUSSD(USSD).getCollateralIndex(baseAsset, false)].oracle.getPriceUSD() / minDivisor;
+            IUSSD(USSD).UniV3SwapInput(collateral[i].pathsell, amountToSellUnits, expectedDAI);
             DAItosell += (IERC20Upgradeable(baseAsset).balanceOf(USSD) - amountBefore);
           } else {
             // no need to swap DAI
@@ -176,7 +177,8 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
             if (collateral[i].pathsell.length > 0) {
               uint256 amountBefore = IERC20Upgradeable(baseAsset).balanceOf(USSD);
               // sell all collateral and move to next one
-              IUSSD(USSD).UniV3SwapInput(collateral[i].pathsell, IERC20Upgradeable(collateral[i].token).balanceOf(USSD));
+              uint256 expectedDAI = IERC20Upgradeable(collateral[i].token).balanceOf(USSD) * collateral[i].oracle.getPriceUSD() * IERC20MetadataUpgradeable(collateral[i].token).decimals() * collateral[IUSSD(USSD).getCollateralIndex(baseAsset, false)].oracle.getPriceUSD() / minDivisor;
+              IUSSD(USSD).UniV3SwapInput(collateral[i].pathsell, IERC20Upgradeable(collateral[i].token).balanceOf(USSD), expectedDAI);
               amountToBuyLeftUSD -= (IERC20Upgradeable(baseAsset).balanceOf(USSD) - amountBefore);
               DAItosell += (IERC20Upgradeable(baseAsset).balanceOf(USSD) - amountBefore);
             } else {
@@ -200,9 +202,9 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
 
       if (DAItosell > 0) {
         if (uniPool.token0() == USSD) {
-            IUSSD(USSD).UniV3SwapInput(bytes.concat(abi.encodePacked(uniPool.token1(), hex"0001f4", uniPool.token0())), DAItosell);
+            IUSSD(USSD).UniV3SwapInput(bytes.concat(abi.encodePacked(uniPool.token1(), hex"000064", uniPool.token0())), DAItosell, 0);
         } else {
-            IUSSD(USSD).UniV3SwapInput(bytes.concat(abi.encodePacked(uniPool.token0(), hex"0001f4", uniPool.token1())), DAItosell);
+            IUSSD(USSD).UniV3SwapInput(bytes.concat(abi.encodePacked(uniPool.token0(), hex"000064", uniPool.token1())), DAItosell, 0);
         }
       }
 
@@ -215,11 +217,11 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
       uint256 daibought = 0;
       if (uniPool.token0() == USSD) {
         daibought = IERC20Upgradeable(baseAsset).balanceOf(USSD);
-        IUSSD(USSD).UniV3SwapInput(bytes.concat(abi.encodePacked(uniPool.token0(), hex"0001f4", uniPool.token1())), amount);
+        IUSSD(USSD).UniV3SwapInput(bytes.concat(abi.encodePacked(uniPool.token0(), hex"000064", uniPool.token1())), amount, 0);
         daibought = IERC20Upgradeable(baseAsset).balanceOf(USSD) - daibought; // would revert if DAI is not bought
       } else {
         daibought = IERC20Upgradeable(baseAsset).balanceOf(USSD);
-        IUSSD(USSD).UniV3SwapInput(bytes.concat(abi.encodePacked(uniPool.token1(), hex"0001f4", uniPool.token0())), amount);
+        IUSSD(USSD).UniV3SwapInput(bytes.concat(abi.encodePacked(uniPool.token1(), hex"000064", uniPool.token0())), amount, 0);
         daibought = IERC20Upgradeable(baseAsset).balanceOf(USSD) - daibought; // would revert if DAI is not bought
       }
 
@@ -237,21 +239,23 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
       }
 
       CollateralInfo[] memory collateral = IUSSD(USSD).collateralList();
-      uint portions = 0;
-      uint ownval = (getOwnValuation() * 1e18 / 1e6) * IUSSD(USSD).totalSupply() / 1e6; // 1e18 total USSD value
-      for (uint256 i = 0; i < collateral.length; i++) {
+      uint256 portions = 0;
+      uint256 ownval = (getOwnValuation() * 1e18 / 1e6) * IUSSD(USSD).totalSupply() / 1e6; // 1e18 total USSD value
+      uint256 length = collateral.length;
+      for (uint256 i = 0; i < length; i++) {
         uint256 collateralval = IERC20Upgradeable(collateral[i].token).balanceOf(USSD) * 1e18 / (10**IERC20MetadataUpgradeable(collateral[i].token).decimals()) * collateral[i].oracle.getPriceUSD() / 1e18;
         if (collateralval * 1e18 / ownval < collateral[i].ratios[flutter]) {
           portions++;
         }
       }
 
-      for (uint256 i = 0; i < collateral.length; i++) {
+      for (uint256 i = 0; i < length; i++) {
         uint256 collateralval = IERC20Upgradeable(collateral[i].token).balanceOf(USSD) * 1e18 / (10**IERC20MetadataUpgradeable(collateral[i].token).decimals()) * collateral[i].oracle.getPriceUSD() / 1e18;
         if (collateralval * 1e18 / ownval < collateral[i].ratios[flutter]) {
           if (collateral[i].pathbuy.length > 0) {
             // don't touch DAI if it's needed to be bought (it's already bought)
-            IUSSD(USSD).UniV3SwapInput(collateral[i].pathbuy, daibought/portions);
+            uint256 expectedMinimum = daibought/portions * collateral[IUSSD(USSD).getCollateralIndex(baseAsset, false)].oracle.getPriceUSD() / collateral[i].oracle.getPriceUSD() * IERC20MetadataUpgradeable(collateral[i].token).decimals() / minDivisor;
+            IUSSD(USSD).UniV3SwapInput(collateral[i].pathbuy, daibought/portions, expectedMinimum);
           }
         }
       }

@@ -52,7 +52,7 @@ contract('USSD', function (accounts) {
   }),
 
   it('able to create pool, add collateral and rebalance itself (simulation)', async function () {
-    expect((await this.USSD.totalSupply()).toString()).to.equal('10000000000'); // 10000 USSD minted
+    expect((await this.USSD.totalSupply()).toString()).to.equal('1000000000'); // 1000 USSD minted
 
     let checkBalance = await web3.eth.getBalance(accounts[0]);
     console.log(`Eth balance on ${accounts[0]} is ${checkBalance}`)
@@ -163,11 +163,11 @@ contract('USSD', function (accounts) {
     this.oracleWBGL = await SimOracle.new(web3.utils.toBN('300000000000000000'), { from: accounts[0] });
 
     path_DAI_USSD = "0x" + "6b175474e89094c44da98b954eedeac495271d0f" //DAI
-      + "0001f4" // 0.05% tier (medium-risk)
+      + "000064" // 0.01% tier (low-risk)
       + this.USSD.address.substring(2)
 
     path_USSD_DAI = "0x" + this.USSD.address.substring(2)
-      + "0001f4" // 0.05% tier (medium-risk)
+      + "000064" // 0.01% tier (low-risk)
       + "6b175474e89094c44da98b954eedeac495271d0f" //DAI
 
     path_DAI_USDC = "0x" + "6b175474e89094c44da98b954eedeac495271d0f" //DAI
@@ -256,7 +256,7 @@ contract('USSD', function (accounts) {
       factoryAddress: POOL_FACTORY_CONTRACT_ADDRESS,
       tokenA: USSD_TOKEN,
       tokenB: DAI_TOKEN,
-      fee: FeeAmount.LOW,
+      fee: FeeAmount.LOWEST,
     })
 
     console.log("Computed USSD/DAI pool address: ", currentPoolAddress);
@@ -270,8 +270,10 @@ contract('USSD', function (accounts) {
     // please refer to Uniswap V3 Book uniswapv3book.com for details on tick math, etc.
     let token0 = this.USSD.address.toLowerCase().substring(2);
     let token1 = DAI.toLowerCase().substring(2);
-    let amount0 = "00000000000000000000000000000000000000000000000000000002540BE400";
-    let amount1 = "00000000000000000000000000000000000000000000021E19E0C9BAB2400000";
+    //let amount0 = "00000000000000000000000000000000000000000000000000000002540BE400";
+    //let amount1 = "00000000000000000000000000000000000000000000021E19E0C9BAB2400000";
+    let amount0 = "000000000000000000000000000000000000000000000000000000003B9ACA00";
+    let amount1 = "00000000000000000000000000000000000000000000003635C9ADC5DEA00000";
     let minamount0 = "0000000000000000000000000000000000000000000000000000000000000000";
     let minamount1 = "0000000000000000000000000000000000000000000000000000000000000000";
     let sqrtPriceX96 = "00000000000000000000000000000000000F4240000000000000000000000000"; // 1000000000000000000 / 1000000 sqrt(y/x), price = 1e12, 1 USSD = 1 DAI
@@ -283,8 +285,10 @@ contract('USSD', function (accounts) {
       console.log("DAI token is token 0 in pool");
       token0 = DAI.toLowerCase().substring(2);
       token1 = this.USSD.address.toLowerCase().substring(2);
-      amount0 = "00000000000000000000000000000000000000000000021E19E0C9BAB2400000";
-      amount1 = "00000000000000000000000000000000000000000000000000000002540BE400";
+      //amount0 = "00000000000000000000000000000000000000000000021E19E0C9BAB2400000";
+      //amount1 = "00000000000000000000000000000000000000000000000000000002540BE400";
+      amount0 = "00000000000000000000000000000000000000000000003635C9ADC5DEA00000";
+      amount1 = "000000000000000000000000000000000000000000000000000000003B9ACA00";
       minamount0 = "0000000000000000000000000000000000000000000000000000000000000000";
       minamount1 = "0000000000000000000000000000000000000000000000000000000000000000";
       sqrtPriceX96 = "0000000000000000000000000000000000000000000010C6F7A0B5ED8D36B4C7"; // 1000000 / 1000000000000000000 sqrt(y/x), price = 1e-12, 1 DAI = 1 USSD
@@ -299,13 +303,13 @@ contract('USSD', function (accounts) {
       "0x13ead562" + // encoded function signature ( createAndInitializePoolIfNecessary(address, address, uint24, uint160) )
       "000000000000000000000000" + token0 + // token1 address
       "000000000000000000000000" + token1 + // token2 address
-      "00000000000000000000000000000000000000000000000000000000000001f4" + // fee
+      "0000000000000000000000000000000000000000000000000000000000000064" + // fee
       sqrtPriceX96, // sqrtPriceX96
       // second call
       "0x88316456" + // encoded function signature ( mint((address,address,uint24,int24,int24,uint256,uint256,uint256,uint256,address,uint256)) )
       "000000000000000000000000" + token0 + // token1 address
       "000000000000000000000000" + token1 + // token2 address
-      "00000000000000000000000000000000000000000000000000000000000001f4" + // fee
+      "0000000000000000000000000000000000000000000000000000000000000064" + // fee
       tickLower +
       tickUpper +
       amount0 + // amount 1 desired 10000
@@ -340,13 +344,13 @@ contract('USSD', function (accounts) {
     await DAIContract.methods.balanceOf(currentPoolAddress).call(function(error, result) {
       console.log(`DAI balance of USSD/DAI POOL at ${currentPoolAddress}: ${result}`);
     });
-      
+
     let ussdbalance2 = (await this.USSD.balanceOf(currentPoolAddress));
     console.log(`USSD balance of USSD/DAI POOL is ${ussdbalance2}`);
 
     let USSDaddr = this.USSD.address;
-    await DAIContract.methods.transfer(USSDaddr, web3.utils.toBN('10000000000000000000000')).send({ from: accounts[0] }, function(error, result) {
-      console.log(`Transferred 10000 DAI as collateral to USSD at ${USSDaddr}: ${result}`);
+    await DAIContract.methods.transfer(USSDaddr, web3.utils.toBN('1000000000000000000000')).send({ from: accounts[0] }, function(error, result) {
+      console.log(`Transferred 1000 DAI as collateral to USSD at ${USSDaddr}: ${result}`);
     });
 
     // two main scenarios:
@@ -371,7 +375,7 @@ contract('USSD', function (accounts) {
       factoryAddress: POOL_FACTORY_CONTRACT_ADDRESS,
       tokenA: USSD_TOKEN,
       tokenB: DAI_TOKEN,
-      fee: FeeAmount.LOW,
+      fee: FeeAmount.LOWEST,
     })
 
     console.log("Computed USSD/DAI pool address: ", currentPoolAddress2);

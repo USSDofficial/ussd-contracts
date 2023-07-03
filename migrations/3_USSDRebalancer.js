@@ -6,4 +6,6 @@ const { deployProxy } = require('@openzeppelin/truffle-upgrades');
 module.exports = async function (deployer, network, accounts) {
     const USSD_instance = await USSD.deployed();
     const USSDRebalancer_instance = await deployProxy(USSDRebalancer, [USSD_instance.address]);
+
+    console.log("USSD rebalancer deployed at: " + USSDRebalancer_instance.address);
 };

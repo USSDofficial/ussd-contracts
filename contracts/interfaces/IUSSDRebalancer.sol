@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.6;
+pragma solidity 0.8.6;
 
 import "./IStableOracle.sol";
 
@@ -30,5 +30,6 @@ interface IUSSD is IERC20Upgradeable {
     function burnRebalancer(uint256 amount) external;
     function collateralList() external returns (CollateralInfo[] calldata);
     function collateralFactor() external returns(uint256);
-    function UniV3SwapInput(bytes memory _path, uint256 _sellAmount) external;
+    function UniV3SwapInput(bytes memory _path, uint256 _sellAmount, uint256 _expectedMinimum) external;
+    function getCollateralIndex(address _token, bool _hasMint) external view returns (uint256);
 }

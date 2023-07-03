@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.6;
+pragma solidity 0.8.6;
 
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "./UniswapV3StaticOracle.sol";
@@ -16,9 +16,9 @@ import "../interfaces/IStaticOracle.sol";
     0x773616e4d11a78f511299002da57a0a94577f1f4 Chainlink DAI/ETH feed
 */
 contract StableOracleDAI is IStableOracle {
-    AggregatorV3Interface priceFeedDAIETH;
-    IStaticOracle staticOracleUniV3;
-    IStableOracle ethOracle;
+    AggregatorV3Interface public immutable priceFeedDAIETH;
+    IStaticOracle public immutable staticOracleUniV3;
+    IStableOracle public immutable ethOracle;
 
     // as is uses DEX to get DAI/WETH price, stable oracle WETH address is required to keep it based to USD
     constructor(address _wethoracle) {
@@ -45,8 +45,9 @@ contract StableOracleDAI is IStableOracle {
         uint256 WETHUSDFeedPrice = ethOracle.getPriceUSD();
 
         // chainlink price data is 18 decimals for DAI/ETH, so multiply by 10 decimals to get 18 decimal fractional
-        //(uint80 roundID, int256 price, uint256 startedAt, uint256 timeStamp, uint80 answeredInRound) = priceFeedDAIETH.latestRoundData();
-        (, int256 price, , , ) = priceFeedDAIETH.latestRoundData();
+        //(uint80 roundID, int256 price, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound) = priceFeedDAIETH.latestRoundData();
+        (, int256 price, , uint256 updatedAt, ) = priceFeedDAIETH.latestRoundData();
+        require(updatedAt > block.timestamp - 86400, "stall");
 
         // flip the fraction
         uint256 WETHDAIFeedPrice = 1e36 / uint256(price);

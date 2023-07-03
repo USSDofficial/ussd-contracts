@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.6;
+pragma solidity 0.8.6;
 
 import "./UniswapV3StaticOracle.sol";
 
@@ -11,8 +11,8 @@ import "../interfaces/IStaticOracle.sol";
     wbgl/weth uni v3 0x982152A6C7f732Ec7C9EA998dDD9Ebde00Dfa16e
 */
 contract StableOracleWBGL is IStableOracle {
-    IStaticOracle staticOracleUniV3;
-    IStableOracle ethOracle;
+    IStaticOracle public immutable staticOracleUniV3;
+    IStableOracle public immutable ethOracle;
 
     constructor(address _wethoracle) {
         staticOracleUniV3 = IStaticOracle(
