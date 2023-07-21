@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.6;
-pragma abicoder v2;
 
 import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
@@ -26,7 +25,7 @@ contract USSD is
     IUSSDRebalancer public rebalancer;
 
     // allowed to manage collateral, set tresholds and perform management tasks
-    bytes32 public constant STABLE_CONTROL_ROLE = 0x478e190950eea9a6d97fe4150463cb11a0076cc417c4b49f2ad9dd1b4d1a4ae1; //keccak256("STABLECONTROL");
+    bytes32 public constant STABLE_CONTROL_ROLE = keccak256("STABLE_CONTROL_ROLE");
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -41,13 +40,13 @@ contract USSD is
         __AccessControl_init_unchained();
         __ERC20_init_unchained(_name, _symbol);
 
-        _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
+        _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());
 
         // mint 10k USSD to create initial pool
         _mint(msg.sender, 1_000 * 1e6);
     }
 
-    function decimals() public view virtual override returns (uint8) {
+    function decimals() public pure override returns (uint8) {
         return 6;
     }
 
@@ -154,13 +153,14 @@ contract USSD is
         require(getCollateralIndex(token, true) < type(uint256).max, "mtkn");
         require(to != address(0));
 
+        stableCoinAmount = calculateMint(token, tokenAmount);
+        _mint(to, stableCoinAmount);
+        
         IERC20Upgradeable(token).safeTransferFrom(
             msg.sender,
             address(this),
             tokenAmount
         );
-        stableCoinAmount = calculateMint(token, tokenAmount);
-        _mint(to, stableCoinAmount);
 
         emit Mint(msg.sender, to, token, tokenAmount, stableCoinAmount);
     }
@@ -197,15 +197,15 @@ contract USSD is
         rebalancer = IUSSDRebalancer(_rebalancer);
     }
 
-    function mintRebalancer(uint256 _amount) public onlyBalancer override {
+    function mintRebalancer(uint256 _amount) public onlyRebalancer override {
         _mint(address(this), _amount);
     }
 
-    function burnRebalancer(uint256 _amount) public onlyBalancer override {
+    function burnRebalancer(uint256 _amount) public onlyRebalancer override {
         _burn(address(this), _amount);
     }
 
-    modifier onlyBalancer() {
+    modifier onlyRebalancer() {
         require(msg.sender == address(rebalancer), "bal");
         _;
     }
@@ -232,7 +232,7 @@ contract USSD is
         bytes memory _path,
         uint256 _sellAmount,
         uint256 _expectedMinimum
-    ) public override onlyBalancer {
+    ) public override onlyRebalancer {
         IV3SwapRouter.ExactInputParams memory params = IV3SwapRouter
             .ExactInputParams({
                 path: _path,

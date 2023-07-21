@@ -24,7 +24,7 @@ contract StableOracleWBGL is IStableOracle {
     function getPriceUSD() external view override returns (uint256) {
         address[] memory pools = new address[](1);
         pools[0] = 0x982152A6C7f732Ec7C9EA998dDD9Ebde00Dfa16e;
-        uint256 wbglWethPrice = staticOracleUniV3
+        uint256 WBGLWETHPrice = staticOracleUniV3
             .quoteSpecificPoolsWithTimePeriod(
                 1000000000000000000, // 1 Eth
                 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2, // WETH (base token)
@@ -33,8 +33,8 @@ contract StableOracleWBGL is IStableOracle {
                 600 // period
             );
 
-        uint256 wethPriceUSD = ethOracle.getPriceUSD();
+        uint256 WETHPriceUSD = ethOracle.getPriceUSD();
 
-        return (wethPriceUSD * 1e18) / wbglWethPrice;
+        return (WETHPriceUSD * 1e18) / WBGLWETHPrice;
     }
 }

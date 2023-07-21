@@ -38,7 +38,7 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
     address private baseAsset;
 
     // role to perform rebalancer management functions
-    bytes32 public constant STABLE_CONTROL_ROLE = keccak256("STABLECONTROL");
+    bytes32 public constant STABLE_CONTROL_ROLE = keccak256("STABLE_CONTROL_ROLE");
 
     // uni v3 liqudity calculator
     // rebalance amount should account for range liquidity
@@ -65,7 +65,7 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
     }
 
     function initialize(address _ussd) public initializer {
-        _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
+        _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());
 
         threshold = 1e4;
         USSD = _ussd;
@@ -109,9 +109,9 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
     function getOwnValuation() public view returns (uint256 price) {
       (uint160 sqrtPriceX96,,,,,,) =  uniPool.slot0();
       if(uniPool.token0() == USSD) {
-        price = uint(sqrtPriceX96)*(uint(sqrtPriceX96))/(1e6) >> (96 * 2);
+        price = uint256(sqrtPriceX96)*(uint256(sqrtPriceX96))/(1e6) >> (96 * 2);
       } else {
-        price = uint(sqrtPriceX96)*(uint(sqrtPriceX96))*(1e18 /* 1e12 + 1e6 decimal representation */) >> (96 * 2);
+        price = uint256(sqrtPriceX96)*(uint256(sqrtPriceX96))*(1e18 /* 1e12 + 1e6 decimal representation */) >> (96 * 2);
         // flip the fraction
         price = (1e24 / price) / 1e12;
       }
@@ -135,7 +135,7 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
         } else {
           amountToBuy = uint256(calculateAmountTillPriceMatch(PRICE_DAIFIRST));
         }
-        BuyUSSDSellCollateral(amountToBuy / 1e12);
+        buyUSSDSellCollateral(amountToBuy / 1e12);
 
       } else if (ownval > 1e6 + threshold) {
         // mint USSD and buy collateral
@@ -145,15 +145,15 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
           IUSSD(USSD).mintRebalancer(uint256(calculateAmountTillPriceMatch(PRICE_DAIFIRST)));
         }
 
-        SellUSSDBuyCollateral();
+        sellUSSDBuyCollateral();
       }
     }
 
-    function BuyUSSDSellCollateral(uint256 amountToBuy) internal {
+    function buyUSSDSellCollateral(uint256 amountToBuy) internal {
       CollateralInfo[] memory collateral = IUSSD(USSD).collateralList();
-      //uint amountToBuyLeftUSD = amountToBuy * 1e12 * 1e6 / getOwnValuation();
-      uint amountToBuyLeftUSD = amountToBuy * 1e12;
-      uint DAItosell = 0;
+      
+      uint256 amountToBuyLeftUSD = amountToBuy * 1e12;
+      uint256 DAItosell = 0;
       // Sell collateral in order of collateral array
       uint256 length = collateral.length;
       for (uint256 i = 0; i < length; i++) {
@@ -211,7 +211,7 @@ contract USSDRebalancer is AccessControlUpgradeable, IUSSDRebalancer {
       IUSSD(USSD).burnRebalancer(IUSSD(USSD).balanceOf(USSD));
     }
 
-    function SellUSSDBuyCollateral() internal {
+    function sellUSSDBuyCollateral() internal {
       uint256 amount = IUSSD(USSD).balanceOf(USSD);
       // sell for DAI then swap by DAI routes
       uint256 daibought = 0;

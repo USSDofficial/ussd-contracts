@@ -21,7 +21,7 @@ contract StableOracleWBTC is IStableOracle {
     function getPriceUSD() external view override returns (uint256) {
         //(uint80 roundID, int256 price, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound) = priceFeed.latestRoundData();
         (, int256 price, , uint256 updatedAt, ) = priceFeed.latestRoundData();
-        require(updatedAt > block.timestamp - 86400, "stall");
+        require(updatedAt > block.timestamp - 7200, "stall");
 
         // chainlink price data is 8 decimals for WETH/USD
         return uint256(price) * 1e10;

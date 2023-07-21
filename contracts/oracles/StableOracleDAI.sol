@@ -47,7 +47,7 @@ contract StableOracleDAI is IStableOracle {
         // chainlink price data is 18 decimals for DAI/ETH, so multiply by 10 decimals to get 18 decimal fractional
         //(uint80 roundID, int256 price, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound) = priceFeedDAIETH.latestRoundData();
         (, int256 price, , uint256 updatedAt, ) = priceFeedDAIETH.latestRoundData();
-        require(updatedAt > block.timestamp - 86400, "stall");
+        require(updatedAt > block.timestamp - 7200, "stall");
 
         // flip the fraction
         uint256 WETHDAIFeedPrice = 1e36 / uint256(price);

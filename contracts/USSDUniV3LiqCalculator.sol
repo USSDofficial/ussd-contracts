@@ -160,13 +160,6 @@ contract UniV3LiqCalculator is IUniswapLiqCalculator {
 	    return amountSpecified - state.amountSpecifiedRemaining;
     }
 
-    function position(int24 tick) private pure returns (int16 wordPos, uint8 bitPos) {
-        unchecked {
-            wordPos = int16(tick >> 8);
-            bitPos = uint8(int8(tick % 256));
-        }
-    }
-
     // tick mapping is public but a complete map cannot be fetched by obvious reasons,
     // so recreate UniV3 tick map method using v3 pools uniPool.tickBitmap() method
     function nextInitializedTickWithinOneWord(
@@ -206,5 +199,12 @@ contract UniV3LiqCalculator is IUniswapLiqCalculator {
                     : (compressed + 1 + int24(uint24(type(uint8).max - bitPos))) * tickSpacing;
         }
       }
+    }
+
+    function position(int24 tick) private pure returns (int16 wordPos, uint8 bitPos) {
+        unchecked {
+            wordPos = int16(tick >> 8);
+            bitPos = uint8(int8(tick % 256));
+        }
     }
 }

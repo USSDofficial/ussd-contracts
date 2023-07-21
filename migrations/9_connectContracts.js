@@ -34,11 +34,11 @@ module.exports = async function (deployer, network, accounts) {
     console.log("WBTC oracle deployed at: " + StableOracleWBTC_instance.address);
     console.log("WBGL oracle deployed at: " + StableOracleWBGL_instance.address);
 
-    await USSD_instance.grantRole.sendTransaction(web3.utils.sha3("STABLECONTROL"), accounts[0], { from: accounts[0] });
-    console.log("Granded STABLECONTROL role on USSD to deployer at " + accounts[0]);
+    await USSD_instance.grantRole.sendTransaction(web3.utils.sha3("STABLE_CONTROL_ROLE"), accounts[0], { from: accounts[0] });
+    console.log("Granded STABLE_CONTROL_ROLE role on USSD to deployer at " + accounts[0]);
 
-    await USSDRebalancer_instance.grantRole.sendTransaction(web3.utils.sha3("STABLECONTROL"), accounts[0], { from: accounts[0] });
-    console.log("Granded STABLECONTROL role on USSD Rebalancer to deployer at " + accounts[0]);
+    await USSDRebalancer_instance.grantRole.sendTransaction(web3.utils.sha3("STABLE_CONTROL_ROLE"), accounts[0], { from: accounts[0] });
+    console.log("Granded STABLE_CONTROL_ROLE role on USSD Rebalancer to deployer at " + accounts[0]);
 
     const path_DAI_USSD = "0x" + "6b175474e89094c44da98b954eedeac495271d0f" //DAI
         + "000064" // 0.01% tier (low-risk)
