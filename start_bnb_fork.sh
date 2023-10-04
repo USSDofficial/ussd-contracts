@@ -1,0 +1,1 @@
+yarn truffle console --network bsc_fork
